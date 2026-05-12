@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mermaid 流程图预览</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 16px;
+            background: #16213e;
+            border-bottom: 1px solid #0f3460;
+            flex-shrink: 0;
+            z-index: 100;
+        }
+        .toolbar h1 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e94560;
+        }
+        .toolbar button {
+            padding: 6px 14px;
+            border: 1px solid #0f3460;
+            background: #0f3460;
+            color: #eee;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .toolbar button:hover { background: #e94560; border-color: #e94560; }
+        .toolbar button.primary { background: #e94560; border-color: #e94560; }
+        .toolbar button.primary:hover { background: #c73e54; }
+        .toolbar .zoom-info {
+            font-size: 13px;
+            color: #aaa;
+            min-width: 50px;
+            text-align: center;
+        }
+        .toolbar .spacer { flex: 1; }
+
+        .main-area {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Editor panel */
+        .editor-panel {
+            width: 400px;
+            min-width: 250px;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #0f3460;
+            background: #16213e;
+            flex-shrink: 0;
+        }
+        .editor-panel .panel-header {
+            padding: 10px 14px;
+            font-size: 13px;
+            color: #aaa;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .editor-panel textarea {
+            flex: 1;
+            resize: none;
+            border: none;
+            outline: none;
+            padding: 14px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            background: #0d1b2a;
+            color: #e0e0e0;
+            tab-size: 4;
+        }
+
+        /* Preview panel */
+        .preview-panel {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+            cursor: grab;
+        }
+        .preview-panel:active { cursor: grabbing; }
+        .chart-wrapper {
+            position: absolute;
+            transform-origin: 0 0;
+        }
+        #mermaid-chart {
+            background: #fff;
+            border-radius: 8px;
+            padding: 30px;
+            display: inline-block;
+        }
+        #mermaid-chart svg { display: block; }
+
+        /* Resizer */
+        .resizer {
+            width: 5px;
+            cursor: col-resize;
+            background: #0f3460;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+        .resizer:hover { background: #e94560; }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: #e94560;
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+
+        .shortcuts {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 11px;
+            color: #666;
+            background: rgba(22,33,62,0.9);
+            padding: 6px 10px;
+            border-radius: 6px;
+        }
+        .shortcuts kbd {
+            background: #0f3460;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        .editor-panel.collapsed { width: 0; min-width: 0; overflow: hidden; border: none; }
+        .editor-panel.collapsed + .resizer { display: none; }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <h1>Mermaid 流程图预览</h1>
+        <div class="spacer"></div>
+        <button id="btn-toggle-editor">📝 编辑器</button>
+        <button id="btn-render" class="primary">▶ 渲染</button>
+        <span style="color:#333;">|</span>
+        <button id="btn-zoom-in">+ 放大</button>
+        <button id="btn-zoom-out">- 缩小</button>
+        <span class="zoom-info" id="zoom-info">100%</span>
+        <button id="btn-fit">◻ 适应</button>
+        <button id="btn-reset">⟲ 重置</button>
+        <span style="color:#333;">|</span>
+        <button id="btn-save-png">📷 PNG</button>
+        <button id="btn-save-svg">💾 SVG</button>
+    </div>
+
+    <div class="main-area">
+        <div class="editor-panel" id="editor-panel">
+            <div class="panel-header">
+                <span>Mermaid 代码</span>
+                <span style="font-size:11px;color:#666;">自动渲染 | Ctrl+Enter 立即渲染</span>
+            </div>
+            <textarea id="mermaid-input" spellcheck="false" placeholder="在此输入 Mermaid 流程图代码..."></textarea>
+        </div>
+        <div class="resizer" id="resizer"></div>
+        <div class="preview-panel" id="preview-panel">
+            <div class="chart-wrapper" id="chart-wrapper">
+                <div id="mermaid-chart"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="shortcuts">
+        <kbd>滚轮</kbd> 缩放 | <kbd>拖拽</kbd> 平移 | <kbd>双击</kbd> 适应 | <kbd>Ctrl+Enter</kbd> 渲染
+    </div>
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // Default sample code
+        const defaultCode = `flowchart TD
+    A([开始]) --> B[步骤1]
+    B --> C{条件判断}
+    C -->|是| D[处理A]
+    C -->|否| E[处理B]
+    D --> F([结束])
+    E --> F`;
+
+        const textarea = document.getElementById('mermaid-input');
+        textarea.value = defaultCode;
+
+        // Initialize Mermaid
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'default',
+            flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' },
+            securityLevel: 'loose'
+        });
+
+        // ====== Zoom & Pan (mouse-anchor based) ======
+        let scale = 1;
+        let panX = 0;
+        let panY = 0;
+        let isDragging = false;
+        let dragStartX, dragStartY, dragPanX, dragPanY;
+        let renderCounter = 0;
+
+        const previewPanel = document.getElementById('preview-panel');
+        const wrapper = document.getElementById('chart-wrapper');
+        const zoomInfo = document.getElementById('zoom-info');
+
+        function updateTransform() {
+            wrapper.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+            zoomInfo.textContent = Math.round(scale * 100) + '%';
+        }
+
+        // Fit chart to fully visible in preview panel
+        function fitToScreen() {
+            const chartEl = document.getElementById('mermaid-chart');
+            if (!chartEl.firstChild) return;
+
+            // Get natural size (at scale=1)
+            const prevTransform = wrapper.style.transform;
+            wrapper.style.transform = 'translate(0,0) scale(1)';
+            const chartRect = chartEl.getBoundingClientRect();
+            const panelRect = previewPanel.getBoundingClientRect();
+            wrapper.style.transform = prevTransform;
+
+            const chartW = chartRect.width;
+            const chartH = chartRect.height;
+            const panelW = panelRect.width;
+            const panelH = panelRect.height;
+
+            const padding = 40;
+            const fitScale = Math.min((panelW - padding) / chartW, (panelH - padding) / chartH, 2);
+
+            scale = fitScale;
+            // Center the chart
+            panX = (panelW - chartW * scale) / 2;
+            panY = (panelH - chartH * scale) / 2;
+            updateTransform();
+        }
+
+        function resetView() {
+            scale = 1;
+            panX = 0;
+            panY = 0;
+            updateTransform();
+        }
+
+        // Mouse wheel zoom with mouse as anchor point
+        previewPanel.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            const newScale = Math.max(0.05, Math.min(10, scale * factor));
+
+            // Mouse position relative to preview panel
+            const rect = previewPanel.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            // Anchor: keep the point under mouse fixed
+            panX = mx - (mx - panX) * (newScale / scale);
+            panY = my - (my - panY) * (newScale / scale);
+            scale = newScale;
+
+            updateTransform();
+        }, { passive: false });
+
+        // Drag to pan with inertia
+        let velocityX = 0, velocityY = 0;
+        let lastMoveX = 0, lastMoveY = 0;
+        let lastMoveTime = 0;
+        let inertiaAnimId = null;
+
+        previewPanel.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            isDragging = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            dragPanX = panX;
+            dragPanY = panY;
+            velocityX = 0;
+            velocityY = 0;
+            lastMoveX = e.clientX;
+            lastMoveY = e.clientY;
+            lastMoveTime = performance.now();
+            if (inertiaAnimId) { cancelAnimationFrame(inertiaAnimId); inertiaAnimId = null; }
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const now = performance.now();
+            const dt = now - lastMoveTime;
+            if (dt > 0) {
+                velocityX = (e.clientX - lastMoveX) / dt * 16;
+                velocityY = (e.clientY - lastMoveY) / dt * 16;
+            }
+            lastMoveX = e.clientX;
+            lastMoveY = e.clientY;
+            lastMoveTime = now;
+            panX = dragPanX + (e.clientX - dragStartX);
+            panY = dragPanY + (e.clientY - dragStartY);
+            updateTransform();
+        });
+        document.addEventListener('mouseup', () => {
+            if (!isDragging) return;
+            isDragging = false;
+            // Adaptive inertia: friction & threshold based on chart size
+            const chartEl = document.getElementById('mermaid-chart');
+            const chartW = chartEl.offsetWidth * scale;
+            const chartH = chartEl.offsetHeight * scale;
+            const diagSize = Math.sqrt(chartW * chartW + chartH * chartH);
+            // Larger chart → lower friction (slides further), smaller chart → higher friction
+            const friction = Math.max(0.85, Math.min(0.96, 0.88 + diagSize / 50000));
+            const threshold = Math.max(0.2, diagSize / 8000);
+
+            function inertiaStep() {
+                if (Math.abs(velocityX) < threshold && Math.abs(velocityY) < threshold) {
+                    inertiaAnimId = null;
+                    return;
+                }
+                panX += velocityX;
+                panY += velocityY;
+                velocityX *= friction;
+                velocityY *= friction;
+                updateTransform();
+                inertiaAnimId = requestAnimationFrame(inertiaStep);
+            }
+            inertiaAnimId = requestAnimationFrame(inertiaStep);
+        });
+
+        // Double click to fit
+        previewPanel.addEventListener('dblclick', fitToScreen);
+
+        // ====== Render ======
+        async function renderChart() {
+            const code = textarea.value.trim();
+            if (!code) return showToast('请输入 Mermaid 代码');
+
+            const chartDiv = document.getElementById('mermaid-chart');
+            renderCounter++;
+            const id = 'mermaid-svg-' + renderCounter;
+            try {
+                const { svg } = await mermaid.render(id, code);
+                chartDiv.innerHTML = svg;
+                // Auto fit after render
+                requestAnimationFrame(() => fitToScreen());
+                showToast('渲染成功');
+            } catch (e) {
+                chartDiv.innerHTML = `<pre style="color:red;padding:20px;white-space:pre-wrap;max-width:600px;">${e.message || e}</pre>`;
+                showToast('渲染失败，请检查语法');
+            }
+        }
+
+        // ====== Toolbar ======
+        document.getElementById('btn-render').addEventListener('click', renderChart);
+        document.getElementById('btn-zoom-in').addEventListener('click', () => {
+            const rect = previewPanel.getBoundingClientRect();
+            const cx = rect.width / 2, cy = rect.height / 2;
+            const newScale = Math.min(10, scale * 1.25);
+            panX = cx - (cx - panX) * (newScale / scale);
+            panY = cy - (cy - panY) * (newScale / scale);
+            scale = newScale;
+            updateTransform();
+        });
+        document.getElementById('btn-zoom-out').addEventListener('click', () => {
+            const rect = previewPanel.getBoundingClientRect();
+            const cx = rect.width / 2, cy = rect.height / 2;
+            const newScale = Math.max(0.05, scale / 1.25);
+            panX = cx - (cx - panX) * (newScale / scale);
+            panY = cy - (cy - panY) * (newScale / scale);
+            scale = newScale;
+            updateTransform();
+        });
+        document.getElementById('btn-fit').addEventListener('click', fitToScreen);
+        document.getElementById('btn-reset').addEventListener('click', resetView);
+
+        // Toggle editor
+        document.getElementById('btn-toggle-editor').addEventListener('click', () => {
+            const panel = document.getElementById('editor-panel');
+            panel.classList.toggle('collapsed');
+            // Re-fit after layout change
+            setTimeout(fitToScreen, 300);
+        });
+
+        // Auto render on input (debounced)
+        let renderDebounceTimer = null;
+        textarea.addEventListener('input', () => {
+            clearTimeout(renderDebounceTimer);
+            renderDebounceTimer = setTimeout(() => {
+                renderChart();
+            }, 600);
+        });
+
+        // Ctrl+Enter to render immediately
+        textarea.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                clearTimeout(renderDebounceTimer);
+                renderChart();
+            }
+            // Tab support
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                textarea.value = textarea.value.substring(0, start) + '    ' + textarea.value.substring(end);
+                textarea.selectionStart = textarea.selectionEnd = start + 4;
+            }
+        });
+
+        // ====== Save ======
+        document.getElementById('btn-save-png').addEventListener('click', async () => {
+            const chartEl = document.getElementById('mermaid-chart');
+            if (!chartEl.querySelector('svg')) return showToast('请先渲染流程图');
+            showToast('正在生成PNG...');
+            try {
+                const dataUrl = await htmlToImage.toPng(chartEl, {
+                    backgroundColor: '#ffffff',
+                    pixelRatio: 2
+                });
+                downloadFile(dataUrl, 'flowchart.png');
+                showToast('PNG保存成功！');
+            } catch (e) {
+                console.error(e);
+                savePngFallback();
+            }
+        });
+
+        document.getElementById('btn-save-svg').addEventListener('click', () => {
+            const svgEl = document.querySelector('#mermaid-chart svg');
+            if (!svgEl) return showToast('请先渲染流程图');
+            const svgClone = svgEl.cloneNode(true);
+            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            const svgData = new XMLSerializer().serializeToString(svgClone);
+            const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            downloadFile(url, 'flowchart.svg');
+            URL.revokeObjectURL(url);
+            showToast('SVG保存成功！');
+        });
+
+        function savePngFallback() {
+            const svgEl = document.querySelector('#mermaid-chart svg');
+            if (!svgEl) return showToast('未找到图表');
+            const svgClone = svgEl.cloneNode(true);
+            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            const svgData = new XMLSerializer().serializeToString(svgClone);
+            const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(svgBlob);
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width * 2;
+                canvas.height = img.height * 2;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.scale(2, 2);
+                ctx.drawImage(img, 0, 0);
+                downloadFile(canvas.toDataURL('image/png'), 'flowchart.png');
+                URL.revokeObjectURL(url);
+                showToast('PNG保存成功！');
+            };
+            img.src = url;
+        }
+
+        function downloadFile(url, filename) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        // ====== Resizer ======
+        const resizer = document.getElementById('resizer');
+        const editorPanel = document.getElementById('editor-panel');
+        let isResizing = false;
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const newWidth = Math.max(200, Math.min(800, e.clientX));
+            editorPanel.style.width = newWidth + 'px';
+        });
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                setTimeout(fitToScreen, 50);
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target === textarea) return;
+            if (e.key === '+' || e.key === '=') {
+                document.getElementById('btn-zoom-in').click();
+            } else if (e.key === '-') {
+                document.getElementById('btn-zoom-out').click();
+            } else if (e.key === '0') {
+                fitToScreen();
+            }
+        });
+
+        // Initial render
+        renderChart();
+    </script>
+</body>
+</html>
