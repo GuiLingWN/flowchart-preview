@@ -327,14 +327,25 @@
         document.addEventListener('mouseup', () => {
             if (!isDragging) return;
             isDragging = false;
-            // Adaptive inertia: friction & threshold based on chart size
+            // Adaptive inertia based on visible size and current zoom scale
             const chartEl = document.getElementById('mermaid-chart');
+            const panelRect = previewPanel.getBoundingClientRect();
+            const panelDiag = Math.sqrt(panelRect.width ** 2 + panelRect.height ** 2);
             const chartW = chartEl.offsetWidth * scale;
             const chartH = chartEl.offsetHeight * scale;
-            const diagSize = Math.sqrt(chartW * chartW + chartH * chartH);
-            // Larger chart → lower friction (slides further), smaller chart → higher friction
-            const friction = Math.max(0.85, Math.min(0.96, 0.88 + diagSize / 50000));
-            const threshold = Math.max(0.2, diagSize / 8000);
+            const chartDiag = Math.sqrt(chartW * chartW + chartH * chartH);
+            // Ratio of chart visible size to panel size
+            const sizeRatio = chartDiag / panelDiag;
+
+            // Higher scale or larger chart → more friction (less drift)
+            // Small chart at low zoom → moderate friction
+            const friction = Math.max(0.82, Math.min(0.94, 0.96 - sizeRatio * 0.06 - scale * 0.02));
+            const threshold = Math.max(0.3, 0.5 + sizeRatio * 0.3);
+
+            // Clamp initial velocity to prevent extreme drift
+            const maxVelocity = panelDiag * 0.03;
+            velocityX = Math.max(-maxVelocity, Math.min(maxVelocity, velocityX));
+            velocityY = Math.max(-maxVelocity, Math.min(maxVelocity, velocityY));
 
             function inertiaStep() {
                 if (Math.abs(velocityX) < threshold && Math.abs(velocityY) < threshold) {
