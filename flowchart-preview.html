@@ -206,8 +206,10 @@
     D --> F([结束])
     E --> F`;
 
+        const CACHE_KEY = 'mermaid-preview-code';
         const textarea = document.getElementById('mermaid-input');
-        textarea.value = defaultCode;
+        const cachedCode = localStorage.getItem(CACHE_KEY);
+        textarea.value = cachedCode || defaultCode;
 
         // Initialize Mermaid
         mermaid.initialize({
@@ -349,8 +351,17 @@
             inertiaAnimId = requestAnimationFrame(inertiaStep);
         });
 
-        // Double click to fit
-        previewPanel.addEventListener('dblclick', fitToScreen);
+        // Double click to fit (only when not clicking on text)
+        previewPanel.addEventListener('dblclick', (e) => {
+            const tag = e.target.tagName.toLowerCase();
+            // Don't reset if user is double-clicking on text content (for text selection/copy)
+            if (tag === 'text' || tag === 'tspan' || tag === 'span' || tag === 'p' ||
+                tag === 'foreignobject' || e.target.closest('foreignObject') ||
+                e.target.closest('.nodeLabel') || e.target.closest('.edgeLabel')) {
+                return;
+            }
+            fitToScreen();
+        });
 
         // ====== Render ======
         async function renderChart() {
@@ -403,11 +414,12 @@
             setTimeout(fitToScreen, 300);
         });
 
-        // Auto render on input (debounced)
+        // Auto render on input (debounced) + save to cache
         let renderDebounceTimer = null;
         textarea.addEventListener('input', () => {
             clearTimeout(renderDebounceTimer);
             renderDebounceTimer = setTimeout(() => {
+                localStorage.setItem(CACHE_KEY, textarea.value);
                 renderChart();
             }, 600);
         });
