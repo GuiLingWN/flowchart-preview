@@ -100,6 +100,13 @@
             cursor: grab;
         }
         .preview-panel:active { cursor: grabbing; }
+        /* Text cursor for selectable content */
+        #mermaid-chart text, #mermaid-chart tspan,
+        #mermaid-chart .nodeLabel, #mermaid-chart .edgeLabel,
+        #mermaid-chart foreignObject, #mermaid-chart foreignObject * {
+            cursor: text;
+            user-select: text;
+        }
         .chart-wrapper {
             position: absolute;
             transform-origin: 0 0;
@@ -295,8 +302,17 @@
         let lastMoveTime = 0;
         let inertiaAnimId = null;
 
+        function isTextTarget(el) {
+            const tag = el.tagName.toLowerCase();
+            return tag === 'text' || tag === 'tspan' || tag === 'span' || tag === 'p' ||
+                tag === 'foreignobject' || !!el.closest('foreignObject') ||
+                !!el.closest('.nodeLabel') || !!el.closest('.edgeLabel');
+        }
+
         previewPanel.addEventListener('mousedown', (e) => {
             if (e.button !== 0) return;
+            // Don't drag when clicking on text content
+            if (isTextTarget(e.target)) return;
             isDragging = true;
             dragStartX = e.clientX;
             dragStartY = e.clientY;
