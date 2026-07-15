@@ -163,6 +163,59 @@
 
         .editor-panel.collapsed { width: 0; min-width: 0; overflow: hidden; border: none; }
         .editor-panel.collapsed + .resizer { display: none; }
+
+        /* Image preview modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-box {
+            background: #16213e;
+            border-radius: 10px;
+            max-width: 90vw;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+        .modal-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid #0f3460;
+        }
+        .modal-head span { font-size: 14px; color: #eee; }
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: #aaa;
+            font-size: 20px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .modal-close:hover { color: #e94560; }
+        .modal-body {
+            padding: 16px;
+            overflow: auto;
+            background: #fff;
+            margin: 0 16px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .modal-body img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+        .modal-foot {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            padding: 12px 16px;
+        }
     </style>
 </head>
 <body>
@@ -180,6 +233,7 @@
         <span style="color:#333;">|</span>
         <button id="btn-save-png">📷 PNG</button>
         <button id="btn-save-svg">💾 SVG</button>
+        <button id="btn-preview-img" class="primary">🖼 预览图片</button>
     </div>
 
     <div class="main-area">
@@ -202,6 +256,22 @@
         <kbd>滚轮</kbd> 缩放 | <kbd>拖拽</kbd> 平移 | <kbd>双击</kbd> 适应 | <kbd>Ctrl+Enter</kbd> 渲染
     </div>
     <div class="toast" id="toast"></div>
+
+    <div class="modal-overlay" id="img-modal">
+        <div class="modal-box">
+            <div class="modal-head">
+                <span>图片预览 · 可直接复制或右键图片保存</span>
+                <button class="modal-close" id="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+                <img id="preview-image" alt="flowchart preview" />
+            </div>
+            <div class="modal-foot">
+                <button id="btn-copy-img" class="primary">📋 复制到剪贴板</button>
+                <button id="btn-download-img">⬇ 下载</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         // Default sample code
@@ -499,6 +569,68 @@
             showToast('SVG保存成功！');
         });
 
+        // ====== Image Preview (copy without downloading) ======
+        const imgModal = document.getElementById('img-modal');
+        let previewBlob = null;
+
+        async function generatePreviewBlob() {
+            const chartEl = document.getElementById('mermaid-chart');
+            if (!chartEl.querySelector('svg')) { showToast('请先渲染流程图'); return null; }
+            try {
+                return await htmlToImage.toBlob(chartEl, {
+                    backgroundColor: '#ffffff',
+                    pixelRatio: 2
+                });
+            } catch (e) {
+                console.error(e);
+                showToast('生成图片失败');
+                return null;
+            }
+        }
+
+        document.getElementById('btn-preview-img').addEventListener('click', async () => {
+            showToast('正在生成图片...');
+            const blob = await generatePreviewBlob();
+            if (!blob) return;
+            previewBlob = blob;
+            document.getElementById('preview-image').src = URL.createObjectURL(blob);
+            imgModal.classList.add('show');
+        });
+
+        function closeImgModal() {
+            imgModal.classList.remove('show');
+            const img = document.getElementById('preview-image');
+            if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+        }
+
+        document.getElementById('modal-close').addEventListener('click', closeImgModal);
+        imgModal.addEventListener('click', (e) => { if (e.target === imgModal) closeImgModal(); });
+
+        document.getElementById('btn-copy-img').addEventListener('click', async () => {
+            if (!previewBlob) return;
+            if (!navigator.clipboard || !window.ClipboardItem) {
+                showToast('当前浏览器不支持复制图片，请使用下载');
+                return;
+            }
+            try {
+                await navigator.clipboard.write([
+                    new ClipboardItem({ [previewBlob.type]: previewBlob })
+                ]);
+                showToast('已复制到剪贴板！');
+            } catch (e) {
+                console.error(e);
+                showToast('复制失败，请使用下载');
+            }
+        });
+
+        document.getElementById('btn-download-img').addEventListener('click', () => {
+            if (!previewBlob) return;
+            const url = URL.createObjectURL(previewBlob);
+            downloadFile(url, 'flowchart.png');
+            URL.revokeObjectURL(url);
+            showToast('PNG保存成功！');
+        });
+
         function savePngFallback() {
             const svgEl = document.querySelector('#mermaid-chart svg');
             if (!svgEl) return showToast('未找到图表');
@@ -562,6 +694,10 @@
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && imgModal.classList.contains('show')) {
+                closeImgModal();
+                return;
+            }
             if (e.target === textarea) return;
             if (e.key === '+' || e.key === '=') {
                 document.getElementById('btn-zoom-in').click();
